@@ -1,0 +1,15 @@
+tasks:
+  - id: fix-typo-readme
+    type: simple
+    action: regex
+    files: ["README.md"]
+    find: "teh"
+    replace: "the"
+
+  - id: add-validation-endpoint
+    type: ai
+    worker: agy
+    prompt: "Add input validation to POST /users endpoint"
+    files: ["src/routes/users.ts"]
+    verify:
+      command: "npm run build"
