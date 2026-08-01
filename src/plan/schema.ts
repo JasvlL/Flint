@@ -20,7 +20,7 @@ export const simpleTaskSchema = baseTaskSchema.extend({
 
 export const aiTaskSchema = baseTaskSchema.extend({
   type: z.literal("ai"),
-  worker: z.literal("agy"),
+  worker: z.enum(["agy", "claude"]),
   prompt: z.string().min(1),
   verify: verifySchema.optional(),
 });
