@@ -1,6 +1,7 @@
 import { readFile, writeFile, mkdir } from "node:fs/promises";
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { readFileSync } from "node:fs";
+import { resolve, dirname } from "node:path";
+import { cwd } from "node:process";
 
 export type ProviderName = "opencode" | "agy" | "claude" | "qwen";
 
@@ -22,15 +23,13 @@ const CONFIG_DIR = ".flint";
 const CONFIG_FILE = "providers.json";
 
 function getConfigPath(): string {
-  const __filename = fileURLToPath(import.meta.url);
-  const __dirname = dirname(__filename);
-  return join(__dirname, "..", "..", CONFIG_DIR, CONFIG_FILE);
+  return resolve(cwd(), CONFIG_DIR, CONFIG_FILE);
 }
 
-export async function loadProviders(): Promise<ProvidersFile> {
+function loadProvidersSync(): ProvidersFile {
   const configPath = getConfigPath();
   try {
-    const content = await readFile(configPath, "utf-8");
+    const content = readFileSync(configPath, "utf-8");
     const parsed = JSON.parse(content) as Partial<ProvidersFile>;
     const merged: ProvidersFile = { ...DEFAULT_PROVIDERS };
     for (const key of Object.keys(DEFAULT_PROVIDERS) as ProviderName[]) {
@@ -42,6 +41,10 @@ export async function loadProviders(): Promise<ProvidersFile> {
   } catch {
     return DEFAULT_PROVIDERS;
   }
+}
+
+export async function loadProviders(): Promise<ProvidersFile> {
+  return loadProvidersSync();
 }
 
 export async function saveProviders(config: ProvidersFile): Promise<void> {
@@ -57,7 +60,8 @@ export async function saveProviders(config: ProvidersFile): Promise<void> {
 
 export function isProviderEnabled(name: string): boolean {
   const providerName = name as ProviderName;
-  return DEFAULT_PROVIDERS[providerName]?.enabled ?? false;
+  const providers = loadProvidersSync();
+  return providers[providerName]?.enabled ?? false;
 }
 
 export function maskKey(apiKey?: string): string {
