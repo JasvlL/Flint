@@ -10,6 +10,8 @@ const PRICE_TABLE: Record<string, { input: number; output: number }> = {
   "qwen3-coder-flash": { input: 0.1, output: 0.4 },
   "qwen3-coder-next": { input: 0.11, output: 0.8 },
   "qwen3-coder-plus": { input: 1.0, output: 5.0 },
+  "deepseek/deepseek-chat": { input: 0.14, output: 0.28 },
+  "deepseek/deepseek-r1": { input: 0.435, output: 0.87 },
 };
 
 export interface TokenUsageEntry {
