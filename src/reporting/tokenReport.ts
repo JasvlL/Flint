@@ -21,19 +21,23 @@ export interface TokenUsageEntry {
   inputTokens: number;
   outputTokens: number;
   durationMs?: number;
+  // If the CLI itself reports an authoritative cost (e.g. opencode's Zen gateway), pass it
+  // through instead of estimating from PRICE_TABLE.
+  reportedCostUsd?: number;
 }
 
 const REPORT_DIR = path.resolve("token-reports");
 
 export function recordTokenUsage(entry: TokenUsageEntry): void {
   const price = entry.model ? PRICE_TABLE[entry.model] : undefined;
-  const estimatedCostUsd = price
+  const estimatedCostUsd = entry.reportedCostUsd ?? (price
     ? (entry.inputTokens / 1_000_000) * price.input + (entry.outputTokens / 1_000_000) * price.output
-    : null;
+    : null);
 
+  const { reportedCostUsd, ...rest } = entry;
   const line = JSON.stringify({
     timestamp: new Date().toISOString(),
-    ...entry,
+    ...rest,
     estimatedCostUsd,
   });
 

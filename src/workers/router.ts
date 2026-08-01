@@ -1,7 +1,7 @@
 import type { Difficulty } from "../plan/difficulty.js";
 
 export interface RouteCandidate {
-  worker: "agy" | "claude" | "qwen";
+  worker: "agy" | "claude" | "qwen" | "opencode";
   model: string;
 }
 
@@ -9,6 +9,9 @@ export interface RouteCandidate {
 // "qwen" is the CLI engine name (spawns the `qwen` binary), not the model — it's also used to
 // reach any OpenAI-compatible endpoint configured in ~/.qwen/settings.json, including DeepSeek
 // via OpenRouter (model ids like "deepseek/deepseek-chat"), without installing a separate CLI.
+// "opencode" is a separate CLI engine whose "Zen" gateway offers a rotating set of genuinely
+// free ("...-free") models, including real DeepSeek V4 Flash, with no API key/account needed —
+// it self-reports exact cost per run, so token reporting trusts that over a price table.
 // Prices per 1M tokens (input/output): qwen3-coder-flash $0.10/$0.40, qwen3-coder-next
 // $0.11/$0.80, deepseek/deepseek-chat via OpenRouter ~$0.14/$0.28 (both far cheaper than
 // agy/claude), qwen3-coder-plus $1-$6 (scales with context, no longer "cheap").
@@ -20,9 +23,11 @@ export interface RouteCandidate {
 // no such toggle — claude is always a candidate regardless of whether the subscription is active.
 const ROUTING_TABLE: Record<Difficulty, RouteCandidate[]> = {
   easy: [
-    // OpenRouter's free-tier ("...:free") roster shifts weekly — this specific slug is
-    // verified working as of 2026-08-01, but if it 404s/changes, check openrouter.ai/models
-    // for current $0 options rather than assuming this one still exists.
+    // Free-tier rosters (OpenRouter's "...:free", opencode's Zen "...-free") shift often —
+    // these specific slugs are verified working as of 2026-08-01. If one 404s/changes, check
+    // openrouter.ai/models or `opencode models` for current $0 options rather than assuming
+    // these still exist.
+    { worker: "opencode", model: "opencode/deepseek-v4-flash-free" },
     { worker: "qwen", model: "cohere/north-mini-code:free" },
     { worker: "qwen", model: "qwen3-coder-flash" },
     { worker: "qwen", model: "deepseek/deepseek-chat" },
@@ -31,6 +36,7 @@ const ROUTING_TABLE: Record<Difficulty, RouteCandidate[]> = {
     { worker: "agy", model: "gemini-3.6-flash-medium" },
   ],
   medium: [
+    { worker: "opencode", model: "opencode/deepseek-v4-flash-free" },
     { worker: "qwen", model: "deepseek/deepseek-chat" },
     { worker: "qwen", model: "qwen3-coder-next" },
     { worker: "agy", model: "gemini-3.6-flash-medium" },
