@@ -1,0 +1,30 @@
+import type { Difficulty } from "../plan/difficulty.js";
+
+export interface RouteCandidate {
+  worker: "agy" | "claude";
+  model: string;
+}
+
+// Cheapest first, `claude` CLI reserved for last resort (conserves that subscription's quota).
+// Opus/Fable are never picked automatically — user must request them explicitly in the plan.
+const ROUTING_TABLE: Record<Difficulty, RouteCandidate[]> = {
+  easy: [
+    { worker: "agy", model: "gemini-3.5-flash-low" },
+    { worker: "agy", model: "gemini-3.6-flash-medium" },
+  ],
+  medium: [
+    { worker: "agy", model: "gemini-3.6-flash-medium" },
+    { worker: "agy", model: "gemini-3.1-pro-high" },
+    { worker: "claude", model: "claude-haiku-4-5-20251001" },
+  ],
+  hard: [
+    { worker: "agy", model: "gemini-3.1-pro-high" },
+    { worker: "claude", model: "claude-haiku-4-5-20251001" },
+    { worker: "claude", model: "claude-sonnet-5" },
+  ],
+};
+
+// attempt is 0-indexed: 0 = first try, 1 = retry after a FAILED verify, etc.
+export function pickWorker(difficulty: Difficulty, attempt: number): RouteCandidate | undefined {
+  return ROUTING_TABLE[difficulty][attempt];
+}

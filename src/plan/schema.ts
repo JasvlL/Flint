@@ -9,6 +9,7 @@ const verifySchema = z.object({
 const baseTaskSchema = z.object({
   id: z.string().min(1),
   files: z.array(z.string()).min(1),
+  phase: z.string().optional(),
 });
 
 export const simpleTaskSchema = baseTaskSchema.extend({
@@ -20,7 +21,8 @@ export const simpleTaskSchema = baseTaskSchema.extend({
 
 export const aiTaskSchema = baseTaskSchema.extend({
   type: z.literal("ai"),
-  worker: z.enum(["agy", "claude"]),
+  worker: z.enum(["agy", "claude"]).optional(),
+  model: z.string().optional(),
   prompt: z.string().min(1),
   verify: verifySchema.optional(),
 });

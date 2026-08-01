@@ -7,5 +7,5 @@ export interface CliRunResult {
 
 export interface CliAdapter {
   name: string;
-  run(prompt: string, cwd: string, timeoutMs?: number): Promise<CliRunResult>;
+  run(prompt: string, cwd: string, model?: string, timeoutMs?: number): Promise<CliRunResult>;
 }

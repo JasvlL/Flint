@@ -5,13 +5,11 @@ const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
 
 export const claudeAdapter: CliAdapter = {
   name: "claude",
-  run(prompt: string, cwd: string, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<CliRunResult> {
+  run(prompt: string, cwd: string, model?: string, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<CliRunResult> {
     return new Promise((resolve) => {
-      const child = spawn(
-        "claude",
-        ["--print", prompt, "--add-dir", cwd, "--dangerously-skip-permissions"],
-        { cwd },
-      );
+      const args = ["--print", prompt, "--add-dir", cwd, "--dangerously-skip-permissions"];
+      if (model) args.push("--model", model);
+      const child = spawn("claude", args, { cwd });
 
       let stdout = "";
       let stderr = "";
