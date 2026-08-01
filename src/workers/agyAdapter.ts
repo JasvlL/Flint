@@ -3,7 +3,7 @@ import path from "node:path";
 import type { CliAdapter, CliRunResult } from "./cliAdapter.js";
 import { recordTokenUsage } from "../reporting/tokenReport.js";
 
-const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
+const DEFAULT_TIMEOUT_MS = 3 * 60 * 1000;
 
 export const agyAdapter: CliAdapter = {
   name: "agy",

@@ -1,6 +1,5 @@
 import { simpleGit } from "simple-git";
-import { existsSync } from "node:fs";
-import { execSync } from "node:child_process";
+import { existsSync, cpSync } from "node:fs";
 import path from "node:path";
 
 export interface Worktree {
@@ -22,12 +21,14 @@ export async function createWorktree(taskId: string): Promise<Worktree> {
   await git.raw(["worktree", "add", dir, "-b", branch]);
 
   // Verify commands (e.g. `npm run build`) need node_modules present in the worktree.
-  // A symlink/junction to the main repo's node_modules is NOT safe: `git worktree remove`
-  // recursively deletes the worktree directory and follows the junction, wiping the
-  // real node_modules it points to. Installing fresh (npm's local cache keeps this fast)
-  // is slower but doesn't risk destroying shared state.
-  if (existsSync(path.resolve("package.json"))) {
-    execSync("npm install", { cwd: dir, stdio: "pipe" });
+  // A symlink/junction to the main repo's node_modules is NOT safe (already learned that one
+  // the hard way: `git worktree remove` recursively deletes the worktree and follows the
+  // junction, wiping the real node_modules it points to). `npm install` per attempt was safe
+  // but slow — a real, independent copy is just as safe (deleting it later only removes the
+  // copy) and far faster than resolving/installing from scratch every attempt.
+  const mainNodeModules = path.resolve("node_modules");
+  if (existsSync(mainNodeModules)) {
+    cpSync(mainNodeModules, path.join(dir, "node_modules"), { recursive: true });
   }
 
   return { taskId, dir, branch };

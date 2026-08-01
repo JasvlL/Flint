@@ -1,9 +1,20 @@
-import { spawn } from "node:child_process";
+import { spawn, execSync } from "node:child_process";
 import path from "node:path";
-import type { CliAdapter, CliRunResult } from "./cliAdapter.js";
+import { killProcessTree, type CliAdapter, type CliRunResult } from "./cliAdapter.js";
 import { recordTokenUsage } from "../reporting/tokenReport.js";
 
-const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
+const DEFAULT_TIMEOUT_MS = 3 * 60 * 1000;
+
+// opencode's npm global install is a .cmd shim on Windows, not a real .exe (unlike agy/claude).
+// Resolving and spawning the real binary directly avoids needing shell:true (which routes
+// through cmd.exe and can orphan the real process on kill).
+let resolvedOpencodeExe: string | undefined;
+function resolveOpencodeExe(): string {
+  if (resolvedOpencodeExe) return resolvedOpencodeExe;
+  const globalRoot = execSync("npm root -g", { encoding: "utf-8" }).trim();
+  resolvedOpencodeExe = path.join(globalRoot, "opencode-ai", "bin", "opencode.exe");
+  return resolvedOpencodeExe;
+}
 
 export const opencodeAdapter: CliAdapter = {
   name: "opencode",
@@ -11,7 +22,11 @@ export const opencodeAdapter: CliAdapter = {
     return new Promise((resolve) => {
       const args = ["run", prompt, "--auto", "--format", "json"];
       if (model) args.push("--model", model);
-      const child = spawn("opencode", args, { cwd });
+      const command = process.platform === "win32" ? resolveOpencodeExe() : "opencode";
+      // stdin MUST be "ignore", not the spawn default of an open pipe — opencode.exe waits
+      // indefinitely for stdin to close/produce data otherwise, hanging well past when it's
+      // actually done (this was the real cause of multi-minute hangs, not the model/network).
+      const child = spawn(command, args, { cwd, stdio: ["ignore", "pipe", "pipe"] });
 
       let stdout = "";
       let stderr = "";
@@ -19,7 +34,7 @@ export const opencodeAdapter: CliAdapter = {
 
       const timer = setTimeout(() => {
         timedOut = true;
-        child.kill("SIGKILL");
+        if (child.pid) killProcessTree(child.pid);
       }, timeoutMs);
 
       child.stdout.on("data", (chunk) => (stdout += chunk.toString()));

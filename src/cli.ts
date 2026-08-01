@@ -120,7 +120,14 @@ async function runAiAttempt(task: AiTask, worker: "agy" | "claude" | "qwen" | "o
     const contextSlice = sliceContext(task.files);
     const fileEntries = Object.entries(contextSlice.files);
     const fileBlocks = fileEntries.map(([filePath, content]) => `File: ${filePath}\n${content}`);
-    const prompt = fileBlocks.length > 0 ? `${fileBlocks.join("\n\n")}\n\n${task.prompt}` : task.prompt;
+    const context = fileBlocks.length > 0 ? `${fileBlocks.join("\n\n")}\n\n` : "";
+    // Free/cheap models most often fail by describing what they'd do instead of doing it —
+    // this directive exists specifically to close that gap, not for tone.
+    const directive =
+      "IMPORTANT: Actually perform this task now using your file-editing tools. " +
+      "Do not describe, plan, or ask for confirmation — write the real files/changes directly. " +
+      "When done, briefly confirm which file(s) you created or modified.\n\n";
+    const prompt = `${directive}${context}${task.prompt}`;
 
     runResult = await getAdapter(worker).run(prompt, worktree.dir, model);
     verifyResult = await verifyTask(worktree.dir, runResult, task.verify?.command);

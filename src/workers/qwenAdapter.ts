@@ -1,9 +1,21 @@
-import { spawn } from "node:child_process";
+import { spawn, execSync } from "node:child_process";
 import path from "node:path";
-import type { CliAdapter, CliRunResult } from "./cliAdapter.js";
+import { killProcessTree, type CliAdapter, type CliRunResult } from "./cliAdapter.js";
 import { recordTokenUsage } from "../reporting/tokenReport.js";
 
-const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
+const DEFAULT_TIMEOUT_MS = 3 * 60 * 1000;
+
+// qwen-code is pure JS (no real .exe like agy/claude/opencode) — its npm global install is a
+// .cmd shim on Windows. shell:true "works" but Windows buffers the wrapped process's stdout
+// through cmd.exe until it exits, and killing the shell can orphan the real process. Spawning
+// node directly against the package's actual entry script avoids the shell entirely.
+let resolvedQwenEntry: string | undefined;
+function resolveQwenEntry(): string {
+  if (resolvedQwenEntry) return resolvedQwenEntry;
+  const globalRoot = execSync("npm root -g", { encoding: "utf-8" }).trim();
+  resolvedQwenEntry = path.join(globalRoot, "@qwen-code", "qwen-code", "cli-entry.js");
+  return resolvedQwenEntry;
+}
 
 export const qwenAdapter: CliAdapter = {
   name: "qwen",
@@ -14,7 +26,14 @@ export const qwenAdapter: CliAdapter = {
       // and just reports back what it *would* do, which verify.ts correctly rejects as no-op.
       const args = ["-p", prompt, "-o", "json", "--approval-mode", "yolo"];
       if (model) args.push("--model", model);
-      const child = spawn("qwen", args, { cwd });
+      // stdin MUST be "ignore" — leaving the spawn default (an open pipe) makes CLIs that check
+      // for piped stdin input hang indefinitely waiting for it to close (confirmed with opencode;
+      // applying the same fix here defensively since qwen-code likely has the same behavior).
+      const stdio: ["ignore", "pipe", "pipe"] = ["ignore", "pipe", "pipe"];
+      const child =
+        process.platform === "win32"
+          ? spawn(process.execPath, [resolveQwenEntry(), ...args], { cwd, stdio })
+          : spawn("qwen", args, { cwd, stdio });
 
       let stdout = "";
       let stderr = "";
@@ -22,7 +41,7 @@ export const qwenAdapter: CliAdapter = {
 
       const timer = setTimeout(() => {
         timedOut = true;
-        child.kill("SIGKILL");
+        if (child.pid) killProcessTree(child.pid);
       }, timeoutMs);
 
       child.stdout.on("data", (chunk) => (stdout += chunk.toString()));
