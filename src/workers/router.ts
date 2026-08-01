@@ -63,3 +63,9 @@ const ROUTING_TABLE: Record<Difficulty, RouteCandidate[]> = {
 export function pickWorker(difficulty: Difficulty, attempt: number): RouteCandidate | undefined {
   return ROUTING_TABLE[difficulty][attempt];
 }
+
+// How many candidates a task can burn through before giving up — shown as "attempt 3/7" so
+// progress is legible while a task is still cascading down the table.
+export function countCandidates(difficulty: Difficulty): number {
+  return ROUTING_TABLE[difficulty].length;
+}

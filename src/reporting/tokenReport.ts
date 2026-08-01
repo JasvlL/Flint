@@ -28,6 +28,20 @@ export interface TokenUsageEntry {
 
 const REPORT_DIR = path.resolve("token-reports");
 
+export type RecordedTokenUsage = Omit<TokenUsageEntry, "reportedCostUsd"> & {
+  estimatedCostUsd: number | null;
+};
+
+// Adapters call recordTokenUsage from deep inside themselves and hold no reference to the
+// current run, so live cost reporting is relayed through these listeners instead of threading
+// an event handler through every adapter signature.
+const listeners = new Set<(usage: RecordedTokenUsage) => void>();
+
+export function onTokenUsage(listener: (usage: RecordedTokenUsage) => void): () => void {
+  listeners.add(listener);
+  return () => void listeners.delete(listener);
+}
+
 export function recordTokenUsage(entry: TokenUsageEntry): void {
   const price = entry.model ? PRICE_TABLE[entry.model] : undefined;
   const estimatedCostUsd = entry.reportedCostUsd ?? (price
@@ -35,13 +49,19 @@ export function recordTokenUsage(entry: TokenUsageEntry): void {
     : null);
 
   const { reportedCostUsd, ...rest } = entry;
-  const line = JSON.stringify({
-    timestamp: new Date().toISOString(),
-    ...rest,
-    estimatedCostUsd,
-  });
+  const usage: RecordedTokenUsage = { ...rest, estimatedCostUsd };
+  const line = JSON.stringify({ timestamp: new Date().toISOString(), ...usage });
 
   if (!existsSync(REPORT_DIR)) mkdirSync(REPORT_DIR, { recursive: true });
   const file = path.join(REPORT_DIR, `${new Date().toISOString().slice(0, 10)}.jsonl`);
   appendFileSync(file, line + "\n", "utf-8");
+
+  // A listener throwing must not break the run that produced the usage.
+  for (const listener of listeners) {
+    try {
+      listener(usage);
+    } catch {
+      // ignore
+    }
+  }
 }

@@ -2,24 +2,13 @@
 import { Command } from "commander";
 import { loadPlan } from "./plan/loader.js";
 import { generatePlanFromGoal } from "./plan/metaPlanner.js";
-import { scoreDifficulty } from "./plan/difficulty.js";
-import { runSimpleTask } from "./caveman/filter.js";
-import { sliceContext } from "./context/slicer.js";
-import { createWorktree, removeWorktree, mergeTaskBranch, deleteTaskBranch } from "./worktree/manager.js";
-import { getAdapter } from "./workers/registry.js";
-import { pickWorker } from "./workers/router.js";
-import { verifyTask } from "./verify/verifier.js";
-import { printReport, type TaskReport } from "./report.js";
+import { runPlan } from "./engine/orchestrator.js";
+import { noopEventHandler } from "./engine/events.js";
+import { printReport } from "./report.js";
 import { printCostSummary } from "./reporting/summary.js";
-import type { AiTask, Plan, Task } from "./plan/schema.js";
-
-
-const MAX_PARALLEL_PER_PHASE = 3;
+import type { Plan } from "./plan/schema.js";
 
 const program = new Command();
-
-// Serializes merges into main across concurrently running AI tasks (git can't merge in parallel).
-let mergeQueue: Promise<void> = Promise.resolve();
 
 program
   .name("flint")
@@ -30,8 +19,7 @@ program
   .description("Run an existing plan.yml")
   .argument("<planFile>", "path to plan.yml")
   .action(async (planFile: string) => {
-    const plan = loadPlan(planFile);
-    await executePlan(plan);
+    await executeAndReport(loadPlan(planFile));
   });
 
 program
@@ -39,8 +27,7 @@ program
   .description("Generate and run a plan from a free-form goal description")
   .argument("<description>", "what you want built, in plain language")
   .action(async (description: string) => {
-    const plan = await generatePlanFromGoal(description);
-    await executePlan(plan);
+    await executeAndReport(await generatePlanFromGoal(description));
   });
 
 program
@@ -48,136 +35,14 @@ program
   .description("Show cost/token usage summary from token-reports")
   .action(() => printCostSummary());
 
-async function executePlan(plan: Plan): Promise<void> {
-  const phases = groupByPhase(plan.tasks);
-  const allReports: TaskReport[] = [];
-
-  for (const phaseTasks of phases) {
-    const reports = await runWithConcurrencyLimit(phaseTasks, MAX_PARALLEL_PER_PHASE, runTask);
-    allReports.push(...reports);
-  }
-
-  printReport(allReports);
+// Batch mode stays quiet while running and reports at the end, same as before — live progress
+// is what the interactive session is for. process.exit lives here, not in the engine, so a
+// long-lived session can run many plans without the first one killing the process.
+async function executeAndReport(plan: Plan): Promise<void> {
+  const reports = await runPlan(plan, noopEventHandler);
+  printReport(reports);
   printCostSummary();
-  process.exit(allReports.some((r) => r.status === "FAILED") ? 1 : 0);
-}
-
-// Tasks without a phase all land in a single implicit phase, preserving plan order otherwise.
-function groupByPhase(tasks: Task[]): Task[][] {
-  const byPhase = new Map<string, Task[]>();
-  for (const task of tasks) {
-    const key = task.phase ?? "_default";
-    if (!byPhase.has(key)) byPhase.set(key, []);
-    byPhase.get(key)!.push(task);
-  }
-  return [...byPhase.entries()].sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true })).map(([, v]) => v);
-}
-
-async function runWithConcurrencyLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
-  const results: R[] = new Array(items.length);
-  let next = 0;
-  async function worker(): Promise<void> {
-    while (next < items.length) {
-      const index = next++;
-      results[index] = await fn(items[index]);
-    }
-  }
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
-  return results;
-}
-
-async function runTask(task: Task): Promise<TaskReport> {
-  if (task.type === "simple") {
-    const result = runSimpleTask(task);
-    return { id: task.id, type: "simple", status: result.status, reason: result.reason };
-  }
-  return runAiTaskWithRouting(task);
-}
-
-async function runAiTaskWithRouting(task: AiTask): Promise<TaskReport> {
-  // Explicit worker/model in the plan is an override — run once, no auto-retry across the routing table.
-  if (task.worker) {
-    return runAiAttempt(task, task.worker, task.model);
-  }
-
-  const difficulty = scoreDifficulty(task);
-  let lastReport: TaskReport | undefined;
-  for (let attempt = 0; ; attempt++) {
-    const candidate = pickWorker(difficulty, attempt);
-    if (!candidate) break;
-    lastReport = await runAiAttempt(task, candidate.worker, candidate.model);
-    if (lastReport.status === "PASS") return lastReport;
-  }
-  return lastReport!;
-}
-
-async function runAiAttempt(task: AiTask, worker: "agy" | "claude" | "qwen" | "opencode", model?: string): Promise<TaskReport> {
-  const worktree = await createWorktree(`${task.id}-${Date.now()}`);
-
-  let runResult;
-  let verifyResult;
-  try {
-    const contextSlice = sliceContext(task.files);
-    const fileEntries = Object.entries(contextSlice.files);
-    const fileBlocks = fileEntries.map(([filePath, content]) => `File: ${filePath}\n${content}`);
-    const context = fileBlocks.length > 0 ? `${fileBlocks.join("\n\n")}\n\n` : "";
-    // Free/cheap models most often fail by describing what they'd do instead of doing it —
-    // this directive exists specifically to close that gap, not for tone.
-    const directive =
-      "IMPORTANT: Actually perform this task now using your file-editing tools. " +
-      "Do not describe, plan, or ask for confirmation — write the real files/changes directly. " +
-      "When done, briefly confirm which file(s) you created or modified.\n\n";
-    // opencode in particular has been observed writing to a stale remembered project instead
-    // of the actual cwd it was launched in (same category of bug --new-project fixed for agy,
-    // but opencode has no equivalent flag) — spelling out the exact directory costs nothing
-    // extra since these calls are free/cheap, and directly targets that failure mode.
-    const workdirNotice =
-      `IMPORTANT: Your current working directory is exactly: ${worktree.dir}\n` +
-      "All file paths in this task are relative to THIS directory only. Do not use any " +
-      "other project, workspace, or directory you may remember from a previous session.\n\n";
-    const prompt = `${directive}${workdirNotice}${context}${task.prompt}`;
-
-    runResult = await getAdapter(worker).run(prompt, worktree.dir, model);
-    verifyResult = await verifyTask(worktree.dir, runResult, task.verify?.command);
-  } catch (err: any) {
-    return { id: task.id, type: "ai", status: "FAILED", reason: err.message, worktreeDir: worktree.dir };
-  }
-
-  // FAILED worktrees are kept on disk for manual inspection (per MVP scope); only PASS is cleaned up.
-  // Merging touches the shared main branch, so it's serialized across concurrently running tasks.
-  // A merge failure (e.g. two subtasks touching the same file) must not crash the whole run —
-  // it downgrades this task to FAILED instead, with the worktree kept for inspection.
-  if (verifyResult.status === "PASS") {
-    let mergeError: Error | undefined;
-    mergeQueue = mergeQueue.then(async () => {
-      try {
-        await mergeTaskBranch(worktree);
-        await removeWorktree(worktree, true);
-        await deleteTaskBranch(worktree);
-      } catch (err: any) {
-        mergeError = err;
-      }
-    });
-    await mergeQueue;
-
-    if (mergeError) {
-      return {
-        id: task.id,
-        type: "ai",
-        status: "FAILED",
-        reason: `[${worker}/${model ?? "default"}] verify passed but merge failed: ${mergeError.message}`,
-        worktreeDir: worktree.dir,
-      };
-    }
-  }
-
-  return {
-    id: task.id,
-    type: "ai",
-    status: verifyResult.status,
-    reason: verifyResult.status === "PASS" ? undefined : `[${worker}/${model ?? "default"}] ${verifyResult.reason}`,
-    worktreeDir: verifyResult.status === "PASS" ? undefined : worktree.dir,
-  };
+  process.exit(reports.some((r) => r.status === "FAILED") ? 1 : 0);
 }
 
 program.parseAsync(process.argv);
