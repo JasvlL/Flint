@@ -103,7 +103,7 @@ async function runAiTaskWithRouting(task: AiTask): Promise<TaskReport> {
   return lastReport!;
 }
 
-async function runAiAttempt(task: AiTask, worker: "agy" | "claude", model?: string): Promise<TaskReport> {
+async function runAiAttempt(task: AiTask, worker: "agy" | "claude" | "qwen", model?: string): Promise<TaskReport> {
   const worktree = await createWorktree(`${task.id}-${Date.now()}`);
 
   let runResult;

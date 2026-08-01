@@ -27,6 +27,13 @@ export const claudeAdapter: CliAdapter = {
         clearTimeout(timer);
         resolve({ exitCode: code, stdout, stderr, timedOut });
       });
+
+      // Without this, a missing binary (ENOENT) never fires "close" and the promise hangs
+      // forever instead of failing so the router can try the next candidate.
+      child.on("error", (err) => {
+        clearTimeout(timer);
+        resolve({ exitCode: null, stdout, stderr: stderr + err.message, timedOut });
+      });
     });
   },
 };

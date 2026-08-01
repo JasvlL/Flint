@@ -3,17 +3,16 @@ import type { CliAdapter, CliRunResult } from "./cliAdapter.js";
 
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
 
-export const agyAdapter: CliAdapter = {
-  name: "agy",
+export const qwenAdapter: CliAdapter = {
+  name: "qwen",
   run(prompt: string, cwd: string, model?: string, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<CliRunResult> {
     return new Promise((resolve) => {
-      // --new-project forces agy to root itself at cwd. Without it, agy can reuse a stale
-      // "active project" from a previous session and write there instead (a real hallucination
-      // risk this flag exists specifically to close off) — --add-dir alone only grants extra
-      // access, it doesn't change where agy defaults to writing.
-      const args = ["--print", prompt, "--new-project", "--add-dir", cwd, "--dangerously-skip-permissions"];
+      // NOTE: --yolo (auto-approve) is the Gemini-CLI-derived convention; not yet confirmed
+      // against a real `qwen` install. Verify with a manual smoke test before relying on this
+      // in production, same way --new-project was confirmed for agy after it initially failed.
+      const args = ["-p", prompt, "--yolo"];
       if (model) args.push("--model", model);
-      const child = spawn("agy", args, { cwd });
+      const child = spawn("qwen", args, { cwd });
 
       let stdout = "";
       let stderr = "";
@@ -32,8 +31,6 @@ export const agyAdapter: CliAdapter = {
         resolve({ exitCode: code, stdout, stderr, timedOut });
       });
 
-      // Without this, a missing binary (ENOENT) never fires "close" and the promise hangs
-      // forever instead of failing so the router can try the next candidate.
       child.on("error", (err) => {
         clearTimeout(timer);
         resolve({ exitCode: null, stdout, stderr: stderr + err.message, timedOut });

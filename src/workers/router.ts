@@ -1,18 +1,22 @@
 import type { Difficulty } from "../plan/difficulty.js";
 
 export interface RouteCandidate {
-  worker: "agy" | "claude";
+  worker: "agy" | "claude" | "qwen";
   model: string;
 }
 
 // Cheapest first, `claude` CLI reserved for last resort (conserves that subscription's quota).
+// Qwen3-Coder-Next ($0.11/$0.80 per 1M tokens) is the cheapest option available and goes first
+// for easy/medium; it's a lightweight model so it's skipped for hard tasks.
 // Opus/Fable are never picked automatically — user must request them explicitly in the plan.
 const ROUTING_TABLE: Record<Difficulty, RouteCandidate[]> = {
   easy: [
+    { worker: "qwen", model: "qwen3-coder-next" },
     { worker: "agy", model: "gemini-3.5-flash-low" },
     { worker: "agy", model: "gemini-3.6-flash-medium" },
   ],
   medium: [
+    { worker: "qwen", model: "qwen3-coder-next" },
     { worker: "agy", model: "gemini-3.6-flash-medium" },
     { worker: "agy", model: "gemini-3.1-pro-high" },
     { worker: "claude", model: "claude-haiku-4-5-20251001" },
