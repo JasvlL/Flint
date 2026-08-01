@@ -43,6 +43,11 @@ program
     await executePlan(plan);
   });
 
+program
+  .command("report")
+  .description("Show cost/token usage summary from token-reports")
+  .action(() => printCostSummary());
+
 async function executePlan(plan: Plan): Promise<void> {
   const phases = groupByPhase(plan.tasks);
   const allReports: TaskReport[] = [];
@@ -121,13 +126,30 @@ async function runAiAttempt(task: AiTask, worker: "agy" | "claude" | "qwen" | "o
 
   // FAILED worktrees are kept on disk for manual inspection (per MVP scope); only PASS is cleaned up.
   // Merging touches the shared main branch, so it's serialized across concurrently running tasks.
+  // A merge failure (e.g. two subtasks touching the same file) must not crash the whole run —
+  // it downgrades this task to FAILED instead, with the worktree kept for inspection.
   if (verifyResult.status === "PASS") {
+    let mergeError: Error | undefined;
     mergeQueue = mergeQueue.then(async () => {
-      await mergeTaskBranch(worktree);
-      await removeWorktree(worktree, true);
-      await deleteTaskBranch(worktree);
+      try {
+        await mergeTaskBranch(worktree);
+        await removeWorktree(worktree, true);
+        await deleteTaskBranch(worktree);
+      } catch (err: any) {
+        mergeError = err;
+      }
     });
     await mergeQueue;
+
+    if (mergeError) {
+      return {
+        id: task.id,
+        type: "ai",
+        status: "FAILED",
+        reason: `[${worker}/${model ?? "default"}] verify passed but merge failed: ${mergeError.message}`,
+        worktreeDir: worktree.dir,
+      };
+    }
   }
 
   return {
