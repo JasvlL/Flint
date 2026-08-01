@@ -39,7 +39,7 @@ program
   .description("Generate and run a plan from a free-form goal description")
   .argument("<description>", "what you want built, in plain language")
   .action(async (description: string) => {
-    const plan = generatePlanFromGoal(description);
+    const plan = await generatePlanFromGoal(description);
     await executePlan(plan);
   });
 
