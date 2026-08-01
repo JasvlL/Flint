@@ -1,4 +1,5 @@
 import type { Difficulty } from "../plan/difficulty.js";
+import { isProviderEnabled } from "../config/providers.js";
 
 export interface RouteCandidate {
   worker: "agy" | "claude" | "qwen" | "opencode";
@@ -14,10 +15,11 @@ export interface RouteCandidate {
 // (qwen/DashScope, qwen/OpenRouter, Kimi): see docs/model-catalog.md.
 // Opus/Fable are never picked automatically — user must request them explicitly in the plan.
 //
-// FUTURE (not implemented yet): quota-plan-based providers (e.g. a paid Claude/ChatGPT plan
-// billed by subscription, not per-token) should become toggleable on/off per-provider so users
-// without an active plan don't get routed to something they can't actually use. For now there's
-// no such toggle — claude is always a candidate regardless of whether the subscription is active.
+// Future direction: quota-plan-based providers (e.g. a paid Claude/ChatGPT plan billed by
+// subscription, not per-token) could become toggleable per-provider so users without an active
+// plan don't get routed to something they can't actually use. The per-provider enabled toggle
+// itself (providers.json) is now wired in: pickWorker/countCandidates filter ROUTING_TABLE down
+// to enabled providers before indexing/counting, so disabled providers are skipped entirely.
 // All 7 of opencode's Zen free models — genuinely $0, so every one of them is tried (each run
 // only takes ~10-15s now that the stdin hang is fixed) before ever spending real tokens/quota
 // on agy/claude. Order = rough best-for-code guess; roster verified 2026-08-01, re-check with
@@ -59,13 +61,19 @@ const ROUTING_TABLE: Record<Difficulty, RouteCandidate[]> = {
   ],
 };
 
+// Filter ROUTING_TABLE down to enabled providers first, then index by attempt — indexing the
+// raw array and filtering afterwards would silently skip attempts when a provider is disabled.
+function enabledCandidates(difficulty: Difficulty): RouteCandidate[] {
+  return ROUTING_TABLE[difficulty].filter((c) => isProviderEnabled(c.worker));
+}
+
 // attempt is 0-indexed: 0 = first try, 1 = retry after a FAILED verify, etc.
 export function pickWorker(difficulty: Difficulty, attempt: number): RouteCandidate | undefined {
-  return ROUTING_TABLE[difficulty][attempt];
+  return enabledCandidates(difficulty)[attempt];
 }
 
 // How many candidates a task can burn through before giving up — shown as "attempt 3/7" so
 // progress is legible while a task is still cascading down the table.
 export function countCandidates(difficulty: Difficulty): number {
-  return ROUTING_TABLE[difficulty].length;
+  return enabledCandidates(difficulty).length;
 }
