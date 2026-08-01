@@ -1,93 +1,173 @@
-import { promises as fs, existsSync, createReadStream } from "node:fs";
+import fs from "node:fs";
 import path from "node:path";
-import readline from "node:readline";
 
-export interface TokenUsageRecord {
-  timestamp: string;
-  worker: string;
-  model?: string;
-  taskLabel: string;
+interface AggregateMetrics {
+  runs: number;
   inputTokens: number;
   outputTokens: number;
-  durationMs?: number;
-  estimatedCostUsd: number | null;
+  cost: number;
 }
 
-const DEFAULT_REPORT_DIR = path.resolve("token-reports");
+export function printCostSummary(): void {
+  const reportDir = path.resolve("token-reports");
 
-/**
- * Locates all `.jsonl` files in the token-reports directory.
- * If the directory does not exist, returns an empty array.
- * Files are returned in alphabetically (chronologically) sorted order of their absolute paths.
- *
- * @param dirPath Optional custom path to the token reports directory.
- */
-export async function locateReportFiles(dirPath: string = DEFAULT_REPORT_DIR): Promise<string[]> {
-  if (!existsSync(dirPath)) {
-    return [];
-  }
-
-  const entries = await fs.readdir(dirPath, { withFileTypes: true });
-  const jsonlFiles = entries
-    .filter((entry) => entry.isFile() && entry.name.endsWith(".jsonl"))
-    .map((entry) => path.join(dirPath, entry.name));
-
-  return jsonlFiles.sort();
-}
-
-/**
- * Streams the token usage records from a single `.jsonl` file line-by-line.
- *
- * @param filePath The absolute or relative path to the `.jsonl` file.
- */
-export async function* streamFileEntries(filePath: string): AsyncGenerator<TokenUsageRecord, void, unknown> {
-  if (!existsSync(filePath)) {
+  if (!fs.existsSync(reportDir)) {
+    console.log("\n=== Cost Summary ===");
+    console.log("No token usage reports found (directory 'token-reports' does not exist).");
     return;
   }
 
-  const fileStream = createReadStream(filePath, "utf-8");
-  const rl = readline.createInterface({
-    input: fileStream,
-    crlfDelay: Infinity,
-  });
+  let files: string[] = [];
+  try {
+    files = fs.readdirSync(reportDir).filter((f) => f.endsWith(".jsonl"));
+  } catch (err: any) {
+    console.log("\n=== Cost Summary ===");
+    console.log(`Failed to read token-reports directory: ${err.message}`);
+    return;
+  }
 
-  for await (const line of rl) {
-    const trimmed = line.trim();
-    if (!trimmed) {
+  if (files.length === 0) {
+    console.log("\n=== Cost Summary ===");
+    console.log("No token usage reports found in 'token-reports'.");
+    return;
+  }
+
+  const workerMap = new Map<string, AggregateMetrics>();
+  const modelMap = new Map<string, AggregateMetrics>();
+
+  let totalRuns = 0;
+  let totalInputTokens = 0;
+  let totalOutputTokens = 0;
+  let totalCost = 0;
+  let hasData = false;
+
+  for (const file of files) {
+    const filePath = path.join(reportDir, file);
+    let content = "";
+    try {
+      content = fs.readFileSync(filePath, "utf-8");
+    } catch {
       continue;
     }
-    try {
-      const record = JSON.parse(trimmed) as TokenUsageRecord;
-      yield record;
-    } catch (error) {
-      console.warn(`[Summary] Failed to parse line in ${filePath}:`, trimmed, error);
+
+    const lines = content.split("\n");
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        const entry = JSON.parse(line);
+        const worker = entry.worker || "unknown";
+        const model = entry.model || "default";
+        const inputTokens = Number(entry.inputTokens) || 0;
+        const outputTokens = Number(entry.outputTokens) || 0;
+        const cost = Number(entry.estimatedCostUsd) || 0;
+
+        hasData = true;
+        totalRuns++;
+        totalInputTokens += inputTokens;
+        totalOutputTokens += outputTokens;
+        totalCost += cost;
+
+        // Aggregate by worker
+        if (!workerMap.has(worker)) {
+          workerMap.set(worker, { runs: 0, inputTokens: 0, outputTokens: 0, cost: 0 });
+        }
+        const wData = workerMap.get(worker)!;
+        wData.runs++;
+        wData.inputTokens += inputTokens;
+        wData.outputTokens += outputTokens;
+        wData.cost += cost;
+
+        // Aggregate by model
+        if (!modelMap.has(model)) {
+          modelMap.set(model, { runs: 0, inputTokens: 0, outputTokens: 0, cost: 0 });
+        }
+        const mData = modelMap.get(model)!;
+        mData.runs++;
+        mData.inputTokens += inputTokens;
+        mData.outputTokens += outputTokens;
+        mData.cost += cost;
+      } catch {
+        // Skip invalid lines
+      }
     }
   }
+
+  if (!hasData) {
+    console.log("\n=== Cost Summary ===");
+    console.log("No valid token usage entries found in reports.");
+    return;
+  }
+
+  // Format and print tables
+  const formatNum = (num: number) => num.toLocaleString("en-US");
+  const formatCost = (cost: number) => `$${cost.toFixed(6)}`;
+
+  // Worker table rows
+  const workerRows: string[][] = [];
+  for (const [worker, metrics] of workerMap.entries()) {
+    workerRows.push([
+      worker,
+      formatNum(metrics.runs),
+      formatNum(metrics.inputTokens),
+      formatNum(metrics.outputTokens),
+      formatCost(metrics.cost),
+    ]);
+  }
+  // Sort rows alphabetically by worker name
+  workerRows.sort((a, b) => a[0].localeCompare(b[0]));
+
+  // Model table rows
+  const modelRows: string[][] = [];
+  for (const [model, metrics] of modelMap.entries()) {
+    modelRows.push([
+      model,
+      formatNum(metrics.runs),
+      formatNum(metrics.inputTokens),
+      formatNum(metrics.outputTokens),
+      formatCost(metrics.cost),
+    ]);
+  }
+  // Sort rows alphabetically by model name
+  modelRows.sort((a, b) => a[0].localeCompare(b[0]));
+
+  const align: ("left" | "right")[] = ["left", "right", "right", "right", "right"];
+
+  printTable("Token Cost Summary by Worker", ["Worker", "Runs", "Input Tokens", "Output Tokens", "Cost (USD)"], align, workerRows);
+  printTable("Token Cost Summary by Model", ["Model", "Runs", "Input Tokens", "Output Tokens", "Cost (USD)"], align, modelRows);
+
+  // Overall totals
+  console.log("\n=== Overall Totals ===");
+  console.log(`Total Runs:          ${formatNum(totalRuns)}`);
+  console.log(`Total Input Tokens:  ${formatNum(totalInputTokens)}`);
+  console.log(`Total Output Tokens: ${formatNum(totalOutputTokens)}`);
+  console.log(`Total Cost (USD):    ${formatCost(totalCost)}`);
+  console.log();
 }
 
-/**
- * Streams token usage records from multiple `.jsonl` files in sequence.
- * If filePaths is not specified, automatically locates all report files in the default directory.
- *
- * @param filePaths Optional list of paths to `.jsonl` files to stream.
- */
-export async function* streamAllEntries(filePaths?: string[]): AsyncGenerator<TokenUsageRecord, void, unknown> {
-  const paths = filePaths ?? (await locateReportFiles());
-  for (const filePath of paths) {
-    yield* streamFileEntries(filePath);
-  }
-}
+function printTable(title: string, headers: string[], align: ("left" | "right")[], rows: string[][]) {
+  const colWidths = headers.map((h, i) => {
+    return Math.max(h.length, ...rows.map((r) => r[i]?.length ?? 0));
+  });
 
-/**
- * Reads all token usage records from the specified `.jsonl` files into an in-memory array.
- * If filePaths is not specified, automatically reads all report files in the default directory.
- *
- * @param filePaths Optional list of paths to `.jsonl` files to read.
- */
-export async function readAllEntries(filePaths?: string[]): Promise<TokenUsageRecord[]> {
-  const records: TokenUsageRecord[] = [];
-  for await (const record of streamAllEntries(filePaths)) {
-    records.push(record);
+  const formatRow = (row: string[]) => {
+    return "| " + row.map((val, i) => {
+      const width = colWidths[i];
+      if (align[i] === "right") {
+        return val.padStart(width);
+      } else {
+        return val.padEnd(width);
+      }
+    }).join(" | ") + " |";
+  };
+
+  const separator = "+-" + colWidths.map((w) => "-".repeat(w)).join("-+-") + "-+";
+
+  console.log(`\n=== ${title} ===`);
+  console.log(separator);
+  console.log(formatRow(headers));
+  console.log(separator);
+  for (const row of rows) {
+    console.log(formatRow(row));
   }
-  return records;
+  console.log(separator);
 }

@@ -10,7 +10,9 @@ import { getAdapter } from "./workers/registry.js";
 import { pickWorker } from "./workers/router.js";
 import { verifyTask } from "./verify/verifier.js";
 import { printReport, type TaskReport } from "./report.js";
+import { printCostSummary } from "./reporting/summary.js";
 import type { AiTask, Plan, Task } from "./plan/schema.js";
+
 
 const MAX_PARALLEL_PER_PHASE = 3;
 
@@ -51,6 +53,7 @@ async function executePlan(plan: Plan): Promise<void> {
   }
 
   printReport(allReports);
+  printCostSummary();
   process.exit(allReports.some((r) => r.status === "FAILED") ? 1 : 0);
 }
 
