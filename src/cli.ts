@@ -117,8 +117,12 @@ async function runAiAttempt(task: AiTask, worker: "agy" | "claude" | "qwen" | "o
   let runResult;
   let verifyResult;
   try {
-    sliceContext(task.files); // context reduction pass; adapter invocation uses task.prompt directly in MVP
-    runResult = await getAdapter(worker).run(task.prompt, worktree.dir, model);
+    const contextSlice = sliceContext(task.files);
+    const fileEntries = Object.entries(contextSlice.files);
+    const fileBlocks = fileEntries.map(([filePath, content]) => `File: ${filePath}\n${content}`);
+    const prompt = fileBlocks.length > 0 ? `${fileBlocks.join("\n\n")}\n\n${task.prompt}` : task.prompt;
+
+    runResult = await getAdapter(worker).run(prompt, worktree.dir, model);
     verifyResult = await verifyTask(worktree.dir, runResult, task.verify?.command);
   } catch (err: any) {
     return { id: task.id, type: "ai", status: "FAILED", reason: err.message, worktreeDir: worktree.dir };
