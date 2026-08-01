@@ -13,13 +13,17 @@
   },
   "dependencies": {
     "commander": "^12.1.0",
+    "ink": "^7.1.1",
+    "ink-text-input": "^6.0.0",
     "js-yaml": "^4.1.0",
+    "react": "^19.2.8",
     "simple-git": "^3.27.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.10.2",
+    "@types/react": "^19.2.18",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"
   }
