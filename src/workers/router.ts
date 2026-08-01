@@ -63,6 +63,7 @@ const ROUTING_TABLE: Record<Difficulty, RouteCandidate[]> = {
 
 // Filter ROUTING_TABLE down to enabled providers first, then index by attempt — indexing the
 // raw array and filtering afterwards would silently skip attempts when a provider is disabled.
+// This implements the per-provider toggle (providers.json) previously noted as future work.
 function enabledCandidates(difficulty: Difficulty): RouteCandidate[] {
   return ROUTING_TABLE[difficulty].filter((c) => isProviderEnabled(c.worker));
 }
