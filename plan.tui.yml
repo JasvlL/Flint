@@ -1,0 +1,201 @@
+# Design rules derived from what actually breaks:
+#  - One file per task. Free models pass small focused tasks and fail multi-file ones.
+#  - Tasks in the SAME phase must be independent: different files, no imports between them,
+#    each must compile on its own (verify runs `npm run build` inside an isolated worktree).
+#  - Anything that imports a file from an earlier task goes in a LATER phase, so the dependency
+#    is already merged into main by the time the worktree is branched.
+#  - Two tasks must never touch the same file — that's the merge conflict that broke a run before.
+#  - No `worker:` set anywhere: auto-routing starts on the free tier and escalates only if needed.
+
+tasks:
+  # ---- Phase 1: two independent new files, run in parallel ----
+  - id: use-fleet-hook
+    type: ai
+    phase: "1"
+    prompt: |
+      Create ONE new file: src/tui/useFleet.ts
+
+      It is a React hook for a terminal UI. Export a named function `useFleet()` that returns:
+        { tasks, isRunning, totalCostUsd, startRun }
+
+      Types:
+        export interface FleetTask {
+          id: string;
+          status: "pending" | "running" | "pass" | "failed";
+          worker?: string;
+          model?: string;
+          attempt?: number;
+          totalCandidates?: number;
+          startedAt?: number;
+          reason?: string;
+        }
+
+      `startRun` has signature: (plan: Plan) => Promise<void>
+      It calls `runPlan(plan, onEvent)` imported from "../engine/orchestrator.js", sets
+      isRunning true while it runs and false when it settles (use try/finally).
+
+      The onEvent callback receives a `FlintEvent` from "../engine/events.ts". Handle it with a
+      switch on event.type:
+        - "run:start": reset tasks to [] and totalCostUsd to 0
+        - "phase:start": for each id in event.taskIds, add a task { id, status: "pending" }
+          if it isn't already in the list
+        - "task:attempt": set that task's status to "running" and record worker, model,
+          attempt, totalCandidates, and startedAt = Date.now()
+        - "task:end": set status to "pass" if event.report.status === "PASS" else "failed",
+          and set reason from event.report.reason
+        - "cost": add (event.costUsd ?? 0) to totalCostUsd
+        - "task:verify", "task:merged", "run:end": no state change needed
+      Ignore any event type not listed.
+
+      Use React's useState and useCallback. Import React hooks from "react".
+      Import the `Plan` type from "../plan/schema.js" and `FlintEvent` from "../engine/events.js".
+
+      IMPORTANT: this project is ESM with NodeNext resolution — every import of a local project
+      file MUST end in .js (e.g. "../engine/orchestrator.js"), never ".ts" and never extensionless.
+      Do not modify any existing file.
+    files:
+      - "src/engine/events.ts"
+      - "src/engine/orchestrator.ts"
+      - "src/plan/schema.ts"
+      - "src/tui/useFleet.ts"
+    verify:
+      command: "npm run build"
+
+  - id: providers-config
+    type: ai
+    phase: "1"
+    prompt: |
+      Create ONE new file: src/config/providers.ts
+
+      It reads and writes a JSON config controlling which AI providers are usable.
+      Config file path: ".flint/providers.json" resolved from the current working directory.
+
+      Export exactly this API:
+        export type ProviderName = "opencode" | "agy" | "claude" | "qwen";
+        export interface ProviderConfig { enabled: boolean; apiKey?: string }
+        export type ProvidersFile = Record<ProviderName, ProviderConfig>;
+
+        export const DEFAULT_PROVIDERS: ProvidersFile
+          // opencode, agy, claude => { enabled: true }
+          // qwen => { enabled: false }   (no funded account yet)
+
+        export function loadProviders(): ProvidersFile
+          // If the file is missing or unparseable, return DEFAULT_PROVIDERS.
+          // If it exists, merge it over DEFAULT_PROVIDERS so a partial/older file still
+          // returns every provider key.
+
+        export function saveProviders(config: ProvidersFile): void
+          // Creates the .flint directory if needed, writes pretty-printed JSON.
+
+        export function isProviderEnabled(name: string): boolean
+          // Unknown names return false.
+
+        export function maskKey(apiKey?: string): string
+          // undefined/empty => "(not set)". Otherwise show only the last 4 characters
+          // prefixed by "...", e.g. "...a1b2". Never return the full key — this value gets
+          // printed to the terminal.
+
+      Use node:fs and node:path. Do not add dependencies. Do not modify any existing file.
+      This project is ESM with NodeNext resolution — local imports must end in .js.
+    files:
+      - "src/config/providers.ts"
+    verify:
+      command: "npm run build"
+
+  # ---- Phase 2: each depends on a Phase 1 file that is merged into main by now ----
+  - id: tui-app
+    type: ai
+    phase: "2"
+    prompt: |
+      Create ONE new file: src/tui/App.tsx
+
+      An Ink terminal UI component. Default-export a React component named `App`.
+      Ink and react are installed and tsconfig already has "jsx": "react-jsx".
+
+      Behavior:
+        - Call the `useFleet` hook from "./useFleet.js" to get
+          { tasks, isRunning, totalCostUsd, startRun }.
+        - Keep local state for the text input value.
+        - Header: a Text line reading `FLINT` followed by the total cost formatted as
+          `$` plus totalCostUsd.toFixed(4).
+        - Task list: render one Text line per task in `tasks`, showing the task id, the
+          worker/model when present, `attempt N/M` when status is "running" and attempt is
+          set, and the status. Give running tasks a distinct color from pass/failed
+          (use the `color` prop on Text).
+        - Input: render TextInput (DEFAULT import from "ink-text-input") bound to the local
+          input state via `value` and `onChange`. On `onSubmit`, if isRunning is true do
+          nothing; otherwise clear the input, then call
+          `generatePlanFromGoal(text)` imported from "../plan/metaPlanner.js" (it is async and
+          resolves to a Plan) and pass the resulting plan to `startRun`.
+        - Wrap everything in a Box with flexDirection="column". Import Box and Text from "ink".
+
+      Keep it simple and readable. No extra dependencies, no external styling libraries.
+      This project is ESM with NodeNext resolution — every local import MUST end in .js
+      (e.g. "./useFleet.js", "../plan/metaPlanner.js").
+      Do not modify any existing file.
+    files:
+      - "src/tui/useFleet.ts"
+      - "src/plan/metaPlanner.ts"
+      - "src/tui/App.tsx"
+    verify:
+      command: "npm run build"
+
+  - id: router-respects-providers
+    type: ai
+    phase: "2"
+    prompt: |
+      Modify ONLY src/workers/router.ts so the routing table skips providers the user has
+      disabled in config.
+
+      Import `isProviderEnabled` from "../config/providers.js".
+
+      Both exported functions must operate on the ENABLED-ONLY candidate list for that
+      difficulty, not the raw table:
+        - pickWorker(difficulty, attempt): filter ROUTING_TABLE[difficulty] down to candidates
+          whose `worker` passes isProviderEnabled, THEN index that filtered array by `attempt`.
+          Indexing the raw array and filtering afterwards would silently skip attempts.
+        - countCandidates(difficulty): return the length of that same filtered array.
+
+      Add a short comment noting this is what replaces the "FUTURE ... toggleable" note in the
+      existing header comment, and update that note so it no longer says it's unimplemented.
+
+      Keep ROUTING_TABLE, RouteCandidate, and the cheapest-first ordering exactly as they are.
+      Do not change any other file. Local imports must end in .js (ESM / NodeNext).
+    files:
+      - "src/workers/router.ts"
+      - "src/config/providers.ts"
+    verify:
+      command: "npm run build"
+
+  # ---- Phase 3: both features converge on cli.ts, so it is serialized alone ----
+  - id: wire-cli
+    type: ai
+    phase: "3"
+    prompt: |
+      Modify ONLY src/cli.ts to add two things, keeping every existing subcommand
+      (run, goal, report) and the executeAndReport helper working exactly as they are now.
+
+      1) Running `flint` with NO subcommand launches the interactive Ink session.
+         Import { render } from "ink", import React from "react", and import App from
+         "./tui/App.js". When process.argv.length <= 2, call
+         render(React.createElement(App)) and return instead of calling program.parseAsync.
+         NOTE: cli.ts is a .ts file, not .tsx — use React.createElement, not JSX syntax.
+
+      2) A `providers` subcommand group, using loadProviders, saveProviders and maskKey
+         imported from "./config/providers.js":
+           - `flint providers`                  -> print each provider, one per line, showing
+                                                   name, "enabled"/"disabled", and maskKey(apiKey).
+                                                   Never print a full API key.
+           - `flint providers enable <name>`    -> set enabled true, save
+           - `flint providers disable <name>`   -> set enabled false, save
+           - `flint providers set-key <name> <key>` -> set apiKey, save, then confirm using
+                                                   maskKey (do not echo the raw key back)
+         For an unknown provider name, print an error and exit with code 1.
+
+      Local imports must end in .js (ESM / NodeNext).
+    files:
+      - "src/cli.ts"
+      - "src/config/providers.ts"
+      - "src/tui/App.tsx"
+    verify:
+      command: "npm run build"

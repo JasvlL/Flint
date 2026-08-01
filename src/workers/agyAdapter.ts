@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import path from "node:path";
-import type { CliAdapter, CliRunResult } from "./cliAdapter.js";
+import { preparePrompt, type CliAdapter, type CliRunResult } from "./cliAdapter.js";
 import { recordTokenUsage } from "../reporting/tokenReport.js";
 
 const DEFAULT_TIMEOUT_MS = 3 * 60 * 1000;
@@ -13,8 +13,9 @@ export const agyAdapter: CliAdapter = {
       // "active project" from a previous session and write there instead (a real hallucination
       // risk this flag exists specifically to close off) — --add-dir alone only grants extra
       // access, it doesn't change where agy defaults to writing.
+      const prepared = preparePrompt(prompt, cwd);
       const args = [
-        "--print", prompt, "--new-project", "--add-dir", cwd,
+        "--print", prepared.arg, "--new-project", "--add-dir", cwd,
         "--dangerously-skip-permissions", "--output-format", "json",
       ];
       if (model) args.push("--model", model);
@@ -34,6 +35,7 @@ export const agyAdapter: CliAdapter = {
 
       child.on("close", (code) => {
         clearTimeout(timer);
+        prepared.cleanup();
         const { text, usage } = parseAgyOutput(stdout);
         if (usage) {
           recordTokenUsage({
@@ -51,6 +53,7 @@ export const agyAdapter: CliAdapter = {
       // forever instead of failing so the router can try the next candidate.
       child.on("error", (err) => {
         clearTimeout(timer);
+        prepared.cleanup();
         resolve({ exitCode: null, stdout, stderr: stderr + err.message, timedOut });
       });
     });

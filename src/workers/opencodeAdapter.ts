@@ -1,6 +1,6 @@
 import { spawn, execSync } from "node:child_process";
 import path from "node:path";
-import { killProcessTree, type CliAdapter, type CliRunResult } from "./cliAdapter.js";
+import { killProcessTree, preparePrompt, type CliAdapter, type CliRunResult } from "./cliAdapter.js";
 import { recordTokenUsage } from "../reporting/tokenReport.js";
 
 const DEFAULT_TIMEOUT_MS = 3 * 60 * 1000;
@@ -30,7 +30,8 @@ export const opencodeAdapter: CliAdapter = {
   name: "opencode",
   run(prompt: string, cwd: string, model?: string, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<CliRunResult> {
     return new Promise((resolve) => {
-      const args = ["run", prompt, "--auto", "--format", "json"];
+      const prepared = preparePrompt(prompt, cwd);
+      const args = ["run", prepared.arg, "--auto", "--format", "json"];
       if (model) {
         args.push("--model", model);
         const variant = BEST_VARIANT[model];
@@ -56,6 +57,7 @@ export const opencodeAdapter: CliAdapter = {
 
       child.on("close", (code) => {
         clearTimeout(timer);
+        prepared.cleanup();
         const { text, inputTokens, outputTokens, costUsd } = parseOpencodeOutput(stdout);
         if (inputTokens !== undefined) {
           recordTokenUsage({
@@ -72,6 +74,7 @@ export const opencodeAdapter: CliAdapter = {
 
       child.on("error", (err) => {
         clearTimeout(timer);
+        prepared.cleanup();
         resolve({ exitCode: null, stdout, stderr: stderr + err.message, timedOut });
       });
     });

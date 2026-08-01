@@ -1,6 +1,6 @@
 import { spawn, execSync } from "node:child_process";
 import path from "node:path";
-import { killProcessTree, type CliAdapter, type CliRunResult } from "./cliAdapter.js";
+import { killProcessTree, preparePrompt, type CliAdapter, type CliRunResult } from "./cliAdapter.js";
 import { recordTokenUsage } from "../reporting/tokenReport.js";
 
 const DEFAULT_TIMEOUT_MS = 3 * 60 * 1000;
@@ -24,7 +24,8 @@ export const qwenAdapter: CliAdapter = {
       // --approval-mode=yolo is required for non-interactive runs to actually write files —
       // without it qwen silently denies write_file/run_shell_command ("Matching deny rule")
       // and just reports back what it *would* do, which verify.ts correctly rejects as no-op.
-      const args = ["-p", prompt, "-o", "json", "--approval-mode", "yolo"];
+      const prepared = preparePrompt(prompt, cwd);
+      const args = ["-p", prepared.arg, "-o", "json", "--approval-mode", "yolo"];
       if (model) args.push("--model", model);
       // stdin MUST be "ignore" — leaving the spawn default (an open pipe) makes CLIs that check
       // for piped stdin input hang indefinitely waiting for it to close (confirmed with opencode;
@@ -49,6 +50,7 @@ export const qwenAdapter: CliAdapter = {
 
       child.on("close", (code) => {
         clearTimeout(timer);
+        prepared.cleanup();
         const { text, usage } = parseQwenOutput(stdout);
         if (usage) {
           recordTokenUsage({
@@ -64,6 +66,7 @@ export const qwenAdapter: CliAdapter = {
 
       child.on("error", (err) => {
         clearTimeout(timer);
+        prepared.cleanup();
         resolve({ exitCode: null, stdout, stderr: stderr + err.message, timedOut });
       });
     });

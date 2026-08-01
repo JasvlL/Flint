@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import type { CliAdapter, CliRunResult } from "./cliAdapter.js";
+import { preparePrompt, type CliAdapter, type CliRunResult } from "./cliAdapter.js";
 
 const DEFAULT_TIMEOUT_MS = 3 * 60 * 1000;
 
@@ -7,7 +7,8 @@ export const claudeAdapter: CliAdapter = {
   name: "claude",
   run(prompt: string, cwd: string, model?: string, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<CliRunResult> {
     return new Promise((resolve) => {
-      const args = ["--print", prompt, "--add-dir", cwd, "--dangerously-skip-permissions"];
+      const prepared = preparePrompt(prompt, cwd);
+      const args = ["--print", prepared.arg, "--add-dir", cwd, "--dangerously-skip-permissions"];
       if (model) args.push("--model", model);
       const child = spawn("claude", args, { cwd });
 
@@ -25,6 +26,7 @@ export const claudeAdapter: CliAdapter = {
 
       child.on("close", (code) => {
         clearTimeout(timer);
+        prepared.cleanup();
         resolve({ exitCode: code, stdout, stderr, timedOut });
       });
 
@@ -32,6 +34,7 @@ export const claudeAdapter: CliAdapter = {
       // forever instead of failing so the router can try the next candidate.
       child.on("error", (err) => {
         clearTimeout(timer);
+        prepared.cleanup();
         resolve({ exitCode: null, stdout, stderr: stderr + err.message, timedOut });
       });
     });
