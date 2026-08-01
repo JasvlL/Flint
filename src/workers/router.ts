@@ -20,6 +20,10 @@ export interface RouteCandidate {
 // no such toggle — claude is always a candidate regardless of whether the subscription is active.
 const ROUTING_TABLE: Record<Difficulty, RouteCandidate[]> = {
   easy: [
+    // OpenRouter's free-tier ("...:free") roster shifts weekly — this specific slug is
+    // verified working as of 2026-08-01, but if it 404s/changes, check openrouter.ai/models
+    // for current $0 options rather than assuming this one still exists.
+    { worker: "qwen", model: "cohere/north-mini-code:free" },
     { worker: "qwen", model: "qwen3-coder-flash" },
     { worker: "qwen", model: "deepseek/deepseek-chat" },
     { worker: "qwen", model: "qwen3-coder-next" },
