@@ -114,6 +114,15 @@ async function executeAndReport(plan: Plan): Promise<void> {
 }
 
 if (process.argv.length <= 2) {
+  // Ink's text input needs raw mode, which requires a real TTY. Piped/redirected/CI stdin
+  // otherwise fails deep inside React with an unreadable reconciler stack trace.
+  if (!process.stdin.isTTY) {
+    console.error(
+      "The interactive session needs a real terminal (TTY).\n" +
+        "Run `flint` directly in a terminal, or use a subcommand: flint goal \"...\" | flint run <plan.yml> | flint report",
+    );
+    process.exit(1);
+  }
   render(React.createElement(App));
 } else {
   await program.parseAsync(process.argv);

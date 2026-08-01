@@ -1,0 +1,37 @@
+tasks:
+  - id: fix-provider-lookup
+    type: ai
+    prompt: |
+      Fix two real bugs in src/config/providers.ts. Modify ONLY that file.
+
+      BUG 1 (critical — the feature is currently a silent no-op):
+      `isProviderEnabled` reads from the hardcoded DEFAULT_PROVIDERS constant instead of the
+      saved config file. That means `flint providers disable claude` writes providers.json but
+      the router still sees claude as enabled, so disabling a provider does nothing at all.
+      It must read the ACTUAL saved config.
+
+      `isProviderEnabled` is called from synchronous code in src/workers/router.ts, so it
+      cannot be made async. Add a synchronous loader using readFileSync from "node:fs" and have
+      isProviderEnabled use that. Keep the existing async loadProviders/saveProviders exports
+      working exactly as they are (the CLI awaits them) — implement the async ones by
+      delegating to the sync logic if that keeps things simple, but do not change their
+      signatures or names.
+
+      BUG 2:
+      `getConfigPath()` builds the path from `import.meta.url` (the compiled file's own
+      location), so the config lands next to the installed package instead of in the user's
+      project. It must resolve ".flint/providers.json" from the CURRENT WORKING DIRECTORY
+      instead — use path.resolve(".flint", "providers.json") or the equivalent with
+      process.cwd(). Remove the now-unused fileURLToPath import if nothing else needs it.
+
+      Keep everything else identical: the exported types (ProviderName, ProviderConfig,
+      ProvidersFile), DEFAULT_PROVIDERS and its values, the merge-over-defaults behavior on
+      load (so a partial or older file still returns every provider key), the fallback to
+      DEFAULT_PROVIDERS when the file is missing or unparseable, and maskKey's exact behavior
+      ("(not set)" when empty, otherwise "..." plus the last 4 characters only).
+
+      This project is ESM with NodeNext resolution — any local import must end in .js.
+    files:
+      - "src/config/providers.ts"
+    verify:
+      command: "npm run build"
