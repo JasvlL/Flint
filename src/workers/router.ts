@@ -18,29 +18,41 @@ export interface RouteCandidate {
 // billed by subscription, not per-token) should become toggleable on/off per-provider so users
 // without an active plan don't get routed to something they can't actually use. For now there's
 // no such toggle — claude is always a candidate regardless of whether the subscription is active.
+// All 7 of opencode's Zen free models — genuinely $0, so every one of them is tried (each run
+// only takes ~10-15s now that the stdin hang is fixed) before ever spending real tokens/quota
+// on agy/claude. Order = rough best-for-code guess; roster verified 2026-08-01, re-check with
+// `opencode models --verbose --refresh` if one starts 404ing.
+const ALL_FREE_OPENCODE: RouteCandidate[] = [
+  { worker: "opencode", model: "opencode/deepseek-v4-flash-free" },
+  { worker: "opencode", model: "opencode/north-mini-code-free" },
+  { worker: "opencode", model: "opencode/laguna-s-2.1-free" },
+  { worker: "opencode", model: "opencode/ling-3.0-flash-free" },
+  { worker: "opencode", model: "opencode/mimo-v2.5-free" },
+  { worker: "opencode", model: "opencode/big-pickle" },
+  { worker: "opencode", model: "opencode/nemotron-3-ultra-free" },
+];
+
+// nemotron-3-ultra-free has a 1M context window — best free option for large/hard tasks, so it
+// goes first when the task is hard specifically (still $0, just reordered).
+const ALL_FREE_OPENCODE_HARD: RouteCandidate[] = [
+  { worker: "opencode", model: "opencode/nemotron-3-ultra-free" },
+  ...ALL_FREE_OPENCODE.filter((c) => c.model !== "opencode/nemotron-3-ultra-free"),
+];
+
 const ROUTING_TABLE: Record<Difficulty, RouteCandidate[]> = {
   easy: [
-    // opencode's Zen free roster shifts — these slugs verified working as of 2026-08-01 via
-    // `opencode models --verbose --refresh`. If one 404s, re-run that command for current ids.
-    { worker: "opencode", model: "opencode/deepseek-v4-flash-free" },
-    { worker: "opencode", model: "opencode/north-mini-code-free" },
-    { worker: "opencode", model: "opencode/laguna-s-2.1-free" },
-    { worker: "opencode", model: "opencode/ling-3.0-flash-free" },
+    ...ALL_FREE_OPENCODE,
     { worker: "agy", model: "gemini-3.5-flash-low" },
     { worker: "agy", model: "gemini-3.6-flash-medium" },
   ],
   medium: [
-    { worker: "opencode", model: "opencode/deepseek-v4-flash-free" },
-    { worker: "opencode", model: "opencode/nemotron-3-ultra-free" },
-    { worker: "opencode", model: "opencode/north-mini-code-free" },
+    ...ALL_FREE_OPENCODE,
     { worker: "agy", model: "gemini-3.6-flash-medium" },
     { worker: "agy", model: "gemini-3.1-pro-high" },
     { worker: "claude", model: "claude-haiku-4-5-20251001" },
   ],
   hard: [
-    // nemotron-3-ultra-free has a 1M context window — best free option for large/hard tasks.
-    { worker: "opencode", model: "opencode/nemotron-3-ultra-free" },
-    { worker: "opencode", model: "opencode/big-pickle" },
+    ...ALL_FREE_OPENCODE_HARD,
     { worker: "agy", model: "gemini-3.1-pro-high" },
     { worker: "claude", model: "claude-haiku-4-5-20251001" },
     { worker: "claude", model: "claude-sonnet-5" },

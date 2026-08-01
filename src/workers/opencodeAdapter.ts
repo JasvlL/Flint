@@ -5,6 +5,16 @@ import { recordTokenUsage } from "../reporting/tokenReport.js";
 
 const DEFAULT_TIMEOUT_MS = 3 * 60 * 1000;
 
+// It's free — no cost tradeoff for using the highest reasoning effort each model supports.
+// Not every free model has a variant (`opencode models --verbose` shows empty variants for
+// big-pickle, mimo-v2.5-free, nemotron-3-ultra-free) — only set --variant where one exists.
+const BEST_VARIANT: Record<string, string> = {
+  "opencode/deepseek-v4-flash-free": "max",
+  "opencode/laguna-s-2.1-free": "high",
+  "opencode/ling-3.0-flash-free": "high",
+  "opencode/north-mini-code-free": "high",
+};
+
 // opencode's npm global install is a .cmd shim on Windows, not a real .exe (unlike agy/claude).
 // Resolving and spawning the real binary directly avoids needing shell:true (which routes
 // through cmd.exe and can orphan the real process on kill).
@@ -21,7 +31,11 @@ export const opencodeAdapter: CliAdapter = {
   run(prompt: string, cwd: string, model?: string, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<CliRunResult> {
     return new Promise((resolve) => {
       const args = ["run", prompt, "--auto", "--format", "json"];
-      if (model) args.push("--model", model);
+      if (model) {
+        args.push("--model", model);
+        const variant = BEST_VARIANT[model];
+        if (variant) args.push("--variant", variant);
+      }
       const command = process.platform === "win32" ? resolveOpencodeExe() : "opencode";
       // stdin MUST be "ignore", not the spawn default of an open pipe — opencode.exe waits
       // indefinitely for stdin to close/produce data otherwise, hanging well past when it's
