@@ -4,6 +4,16 @@ Every model/provider found while building Flint's routing table, whether or not 
 into `router.ts` yet. Costs and free-tier rosters shift — treat dates below as "last verified",
 not permanent.
 
+## Known issue: opencode occasionally writes outside its assigned worktree
+
+Confirmed 2026-08-01 during a 3-agent parallel test (opencode + agy + claude running at the
+same instant): opencode wrote the correct file with correct content, but into the main repo
+directory instead of its own worktree — very similar to the "stale active project" bug fixed in
+agy via `--new-project`. opencode's `run` subcommand has no equivalent flag found so far. Not
+chased further since verify.ts correctly caught it (empty diff in the assigned worktree, task
+marked FAILED, nothing false ever merged) — but worth investigating if it keeps recurring,
+especially under concurrent/parallel dispatch.
+
 ## Implemented and active
 
 | Provider (worker) | Model | Cost /1M tok (in/out) | Notes |
