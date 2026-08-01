@@ -1,5 +1,7 @@
 import { spawn } from "node:child_process";
+import path from "node:path";
 import type { CliAdapter, CliRunResult } from "./cliAdapter.js";
+import { recordTokenUsage } from "../reporting/tokenReport.js";
 
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
 
@@ -11,7 +13,10 @@ export const agyAdapter: CliAdapter = {
       // "active project" from a previous session and write there instead (a real hallucination
       // risk this flag exists specifically to close off) — --add-dir alone only grants extra
       // access, it doesn't change where agy defaults to writing.
-      const args = ["--print", prompt, "--new-project", "--add-dir", cwd, "--dangerously-skip-permissions"];
+      const args = [
+        "--print", prompt, "--new-project", "--add-dir", cwd,
+        "--dangerously-skip-permissions", "--output-format", "json",
+      ];
       if (model) args.push("--model", model);
       const child = spawn("agy", args, { cwd });
 
@@ -29,7 +34,17 @@ export const agyAdapter: CliAdapter = {
 
       child.on("close", (code) => {
         clearTimeout(timer);
-        resolve({ exitCode: code, stdout, stderr, timedOut });
+        const { text, usage } = parseAgyOutput(stdout);
+        if (usage) {
+          recordTokenUsage({
+            worker: "agy",
+            model,
+            taskLabel: path.basename(cwd),
+            inputTokens: usage.input_tokens ?? 0,
+            outputTokens: usage.output_tokens ?? 0,
+          });
+        }
+        resolve({ exitCode: code, stdout: text ?? stdout, stderr, timedOut });
       });
 
       // Without this, a missing binary (ENOENT) never fires "close" and the promise hangs
@@ -41,3 +56,12 @@ export const agyAdapter: CliAdapter = {
     });
   },
 };
+
+function parseAgyOutput(raw: string): { text?: string; usage?: { input_tokens?: number; output_tokens?: number } } {
+  try {
+    const parsed = JSON.parse(raw);
+    return { text: parsed.response, usage: parsed.usage };
+  } catch {
+    return {};
+  }
+}
