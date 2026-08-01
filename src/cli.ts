@@ -127,7 +127,15 @@ async function runAiAttempt(task: AiTask, worker: "agy" | "claude" | "qwen" | "o
       "IMPORTANT: Actually perform this task now using your file-editing tools. " +
       "Do not describe, plan, or ask for confirmation — write the real files/changes directly. " +
       "When done, briefly confirm which file(s) you created or modified.\n\n";
-    const prompt = `${directive}${context}${task.prompt}`;
+    // opencode in particular has been observed writing to a stale remembered project instead
+    // of the actual cwd it was launched in (same category of bug --new-project fixed for agy,
+    // but opencode has no equivalent flag) — spelling out the exact directory costs nothing
+    // extra since these calls are free/cheap, and directly targets that failure mode.
+    const workdirNotice =
+      `IMPORTANT: Your current working directory is exactly: ${worktree.dir}\n` +
+      "All file paths in this task are relative to THIS directory only. Do not use any " +
+      "other project, workspace, or directory you may remember from a previous session.\n\n";
+    const prompt = `${directive}${workdirNotice}${context}${task.prompt}`;
 
     runResult = await getAdapter(worker).run(prompt, worktree.dir, model);
     verifyResult = await verifyTask(worktree.dir, runResult, task.verify?.command);
