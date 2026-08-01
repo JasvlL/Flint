@@ -1,4 +1,4 @@
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { writeFile, mkdir } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { cwd } from "node:process";
