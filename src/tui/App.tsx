@@ -22,7 +22,7 @@ export default function App() {
   return (
     <Box flexDirection="column">
       <Text>
-        FLINT <Text color="green">${`$${totalCostUsd.toFixed(4)}`}</Text>
+        FLINT <Text color="green">${totalCostUsd.toFixed(4)}</Text>
       </Text>
       <Box flexDirection="column">
         {tasks.map((task) => {
